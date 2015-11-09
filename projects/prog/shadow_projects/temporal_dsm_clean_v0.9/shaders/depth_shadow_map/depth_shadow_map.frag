@@ -1,0 +1,251 @@
+// Define used GLSL version
+#version 120
+
+#define DEPTH_BIAS	(-0.015 * 4.)
+
+#define GREEN	vec4( 0, 1, 0, 0 )
+#define RED		vec4( 1, 0, 0, 0 )
+#define BLUE	vec4( 0, 0, 1, 0 )
+
+#define EPSILON		(0.000001)		//@@ trouver l'epsilon des floats (autour de 0.)
+
+//#define USE_SHADOW_PROJ
+#define USE_SHADOW_PCF		0
+#define USE_SHADOW_BICUBIC	1
+
+#define SHADOW_TECHNIQUE	USE_SHADOW_BICUBIC
+
+//#define DRAW_GRID
+//#define DRAW_FILTER_COLOR
+
+// - SAMPLERs
+uniform sampler2DShadow	shadowMap;
+//uniform sampler2D	shadowContour;
+// - TAILLES DES TEXTURES
+uniform vec2 	v2_sm_size;
+// - BIAS SHADOW MAP (uniform)
+uniform float 	coef_depth_bias;
+
+// Current vertex varying attributes for fragment shader
+varying vec4 texelLightSpace;
+
+// - Prototypes - Fonctions
+vec4 	interpolate_bicubic_fast(sampler2D tex, vec2 _texCoord, vec2 _sizeTexture);
+vec4 	interpolate_bicubic_fast(sampler2DShadow tex_depth_map, vec3 _texCoord, vec2 _sizeTexture);
+//
+float 	Compute_Grid( vec2 texelTextureLightSpace, vec2 _sizeTexture );
+vec4	filterColor( in float coef_shadow );
+
+
+void main(void) {
+	vec4 texelTextureLightSpace;
+	#ifdef USE_SHADOW_PROJ
+		texelTextureLightSpace = texelLightSpace;
+		// Bias Uniform (non normalisé)
+		texelTextureLightSpace.z	+= coef_depth_bias * teexelLightSpace.w;
+	#else
+		// Normalisation manuelle (TODO: voir shadow2DProj)
+		vec4 texelLightSpaceNormalized 	= texelLightSpace / texelLightSpace.w;
+
+		// Bias Uniform (TODO: voir Gradient Shadow Map)
+		texelLightSpaceNormalized.z	+= coef_depth_bias;
+
+		// Light_Space to Texture_Space(_light)
+		texelTextureLightSpace = (texelLightSpaceNormalized + vec4(1.) ) * vec4(0.5);
+	#endif
+	
+	float shadow;
+	#if (SHADOW_TECHNIQUE == USE_SHADOW_PCF)
+		// Depth Test (ShadowMap)
+		// - with PCF 2x2 if filter_mode = GL_LINEAR, work on ATI)
+		// - NEAREST mode if filter_mode = GL_NEAREST	
+		float shadow_PCF;
+		#ifdef USE_SHADOW_PROJ
+			shadow_PCF = shadow2DProj( shadowMap, texelLightSpace ).r;	
+		#else
+	 		shadow_PCF = shadow2D( shadowMap, vec3(texelTextureLightSpace) ).r;	
+	 	#endif
+		shadow = shadow_PCF;
+	#elif (SHADOW_TECHNIQUE == USE_SHADOW_BICUBIC)
+		float shadow_BiCubic = interpolate_bicubic_fast( shadowMap, vec3(texelTextureLightSpace), v2_sm_size ).x;
+		shadow = shadow_BiCubic;
+	#endif
+
+ 	/*	
+	//
+	//shadow =  shadow_BiCubic;
+	// -
+	//shadow = shadow_Contour;
+	//shadow = abs( shadow_PCF - shadow_BiCubic );
+	//shadow = shadow_BiCubic < 0.9999 ? shadow_Contour : shadow_PCF;
+	//shadow = abs( shadow_Contour - shadow_BiCubic );
+	//shadow = smoothstep( shadow, -0.01, 0.1 );
+	*/
+		
+	vec4 out_color;
+	
+	out_color = vec4( shadow );
+	
+	// - DEBUG - FILTERS (Clamp, ISOs)
+	#ifdef DRAW_FILTER_COLOR
+		const float coef_iso_color = 1.0;
+		vec4 iso_color = filterColor( shadow ) * coef_iso_color;
+		out_color = length(iso_color) >= EPSILON ? iso_color : out_color;
+	#endif
+
+	// - DEBUG - GRID
+	#ifdef DRAW_GRID
+		const float coef_grid_color = 1.0;
+		float grid_sm = Compute_Grid( vec2(texelTextureLightSpace), v2_sm_size );
+		//out_color += coef_grid_color * ( /**(out_color.x >= -EPSILON) && /**/ (out_color.x <= EPSILON*20000 ) ? (BLUE + GREEN) * grid_sm : out_color);
+		vec4 grid_color = (BLUE + GREEN) * grid_sm * coef_grid_color;
+		// - on veut afficher la grille sur les texels ombrés
+		out_color += shadow < (1-EPSILON) ? (1. - shadow) * grid_color : vec4(0);
+	#endif
+	//
+	// Write result color
+	gl_FragColor = out_color;
+}
+
+// Shadow Texture 2D
+vec4 interpolate_bicubic_fast(sampler2DShadow tex_depth_map, vec3 _texCoord, vec2 _sizeTexture)
+{
+	float 	x = _texCoord.x * _sizeTexture.x,
+		y = _texCoord.y * _sizeTexture.y,
+		z = _texCoord.z;
+	
+	// transform the coordinate from [0,extent] to [-0.5, extent-0.5]
+	vec2 coord_grid = vec2(x - 0.5, y - 0.5);
+	vec2 index 	= floor(coord_grid); 		// nearest integer
+	vec2 fraction 	= coord_grid - index;		//
+	vec2 one_frac 	= 1.0 - fraction;
+	
+	// bspline_weights(fraction, w0, w1, w2, w3);
+	vec2 w0 = 1.0/6.0 * one_frac*one_frac*one_frac;
+	vec2 w1 = 2.0/3.0 - 0.5 * fraction*fraction*(2.0-fraction);
+	vec2 w2 = 2.0/3.0 - 0.5 * one_frac*one_frac*(2.0-one_frac);
+	vec2 w3 = 1.0/6.0 * fraction*fraction*fraction;
+
+	vec2 g0 = w0 + w1;
+	vec2 g1 = w2 + w3;
+	vec2 h0 = (w1 / g0) - vec2(0.5) + index;  //h0 = w1/g0 - 1, move from [-0.5, extent-0.5] to [0, extent]
+	vec2 h1 = (w3 / g1) + vec2(1.5) + index;  //h1 = w3/g1 + 1, move from [-0.5, extent-0.5] to [0, extent]
+	
+	//
+	h0 /= _sizeTexture;
+	h1 /= _sizeTexture;
+	
+	// fetch the four linear interpolations
+	
+	vec4 tex00 = shadow2D(tex_depth_map, vec3(h0.x, h0.y, z) );
+	vec4 tex10 = shadow2D(tex_depth_map, vec3(h1.x, h0.y, z) );
+	vec4 tex01 = shadow2D(tex_depth_map, vec3(h0.x, h1.y, z) );
+	vec4 tex11 = shadow2D(tex_depth_map, vec3(h1.x, h1.y, z) );
+
+	// weigh along the y-direction
+	tex00 = mix(tex01, tex00, g0.y);
+	tex10 = mix(tex11, tex10, g0.y);
+
+	// weigh along the x-direction
+	return mix(tex10, tex00, g0.x);
+}
+
+// Texture 2D
+vec4 interpolate_bicubic_fast(sampler2D tex, vec2 _texCoord, vec2 _sizeTexture)
+{
+	float 	x = _texCoord.x * _sizeTexture.x,
+		y = _texCoord.y * _sizeTexture.y;
+	 
+	// transform the coordinate from [0,extent] to [-0.5, extent-0.5]
+	vec2 coord_grid = vec2(x - 0.5, y - 0.5);
+	vec2 index 	= floor(coord_grid); 		// nearest integer
+	vec2 fraction 	= coord_grid - index;		//
+	vec2 one_frac 	= 1.0 - fraction;
+	
+	// bspline_weights(fraction, w0, w1, w2, w3);
+	vec2 w0 = 1.0/6.0 * one_frac*one_frac*one_frac;
+	vec2 w1 = 2.0/3.0 - 0.5 * fraction*fraction*(2.0-fraction);
+	vec2 w2 = 2.0/3.0 - 0.5 * one_frac*one_frac*(2.0-one_frac);
+	vec2 w3 = 1.0/6.0 * fraction*fraction*fraction;
+
+	vec2 g0 = w0 + w1;
+	vec2 g1 = w2 + w3;
+	vec2 h0 = (w1 / g0) - vec2(0.5) + index;  //h0 = w1/g0 - 1, move from [-0.5, extent-0.5] to [0, extent]
+	vec2 h1 = (w3 / g1) + vec2(1.5) + index;  //h1 = w3/g1 + 1, move from [-0.5, extent-0.5] to [0, extent]
+	
+	//
+	h0 /= _sizeTexture;
+	h1 /= _sizeTexture;
+	
+	// fetch the four linear interpolations
+	vec4 tex00 = texture2D(tex, vec2(h0.x, h0.y) );
+	vec4 tex10 = texture2D(tex, vec2(h1.x, h0.y) );
+	vec4 tex01 = texture2D(tex, vec2(h0.x, h1.y) );
+	vec4 tex11 = texture2D(tex, vec2(h1.x, h1.y) );
+
+	// weigh along the y-direction
+	tex00 = mix(tex01, tex00, g0.y);
+	tex10 = mix(tex11, tex10, g0.y);
+
+	// weigh along the x-direction
+	return mix(tex10, tex00, g0.x);
+}
+
+float Compute_Grid( vec2 texelTextureLightSpace, vec2 _sizeTexture )
+{
+	float tex_width = _sizeTexture.x;
+	float tex_height = _sizeTexture.y;
+	
+	// Grille de projection de la shadow map (i.e grille de rasterisation projetée sur la scene)
+	float grid_sm_x = texelTextureLightSpace.x * tex_width;
+	grid_sm_x -= 0.5;
+	grid_sm_x -= floor(grid_sm_x);	
+	grid_sm_x = 1. - grid_sm_x;
+	
+	float grid_sm_y = texelTextureLightSpace.y * tex_height;
+	grid_sm_y -= 0.5;
+	grid_sm_y -= floor(grid_sm_y);	
+	grid_sm_y = 1. - grid_sm_y;
+	//
+	//float grid_sm = smoothstep( -0.5, +0.5, grid_sm_x );
+	return grid_sm_x * grid_sm_y;
+	}
+	
+vec4 filterColor( in float coef_shadow )
+{
+	vec4 iso_color;
+	
+	// exhibe 3 frontières (3 courbes iso)
+	/**/
+	//const float fCoef_Width = 0.5;
+	const float fCoef_Width = 0.1;
+	vec3 v3CoefISOs;
+	//
+	v3CoefISOs.x = smoothstep( 0. + EPSILON, 0. + fCoef_Width, coef_shadow);
+	v3CoefISOs.y = smoothstep( 1. - fCoef_Width, 1.0 - (0.04), coef_shadow);
+	v3CoefISOs.z = smoothstep( .5 - (fCoef_Width/1.), .5 + (fCoef_Width/1.), coef_shadow);
+	//
+	v3CoefISOs = vec3(1.) - abs((v3CoefISOs*vec3(2.)) - vec3(1.));
+	//
+	iso_color += v3CoefISOs.x * RED;
+	iso_color += v3CoefISOs.y * GREEN;
+	iso_color += v3CoefISOs.z * BLUE;
+	//
+	//iso_color *= coef_iso_color;
+	//
+	//out_color = length(iso_color) > 0.0 ? iso_color : out_color;
+	/**/
+	
+	/**
+	vec4 out_color_iso05 = smoothstep( vec4(0.5-0.04), vec4(0.5+0.04), out_color ) * vec4(0, 0, 1, 0);
+	out_color = mix( out_color_iso05, out_color, abs( out_color.x - 0.5) > 0.04);
+	/**/
+	
+	/**
+	float coef_clamp = 0.5;
+	out_color = step( coef_clamp, out_color );
+	/**/
+	
+	//return out_color;
+	return iso_color;
+	}

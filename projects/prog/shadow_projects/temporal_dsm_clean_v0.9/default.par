@@ -1,0 +1,85 @@
+windowSize = 1024 768
+
+// - OBJ
+//model.default 	= ../../data/models/OBJ/dragon.obj
+//model.default 	= ../../data/models/OBJ/bunny.obj
+//model.default 	= ../../data/models/OBJ/halo.obj
+// - OFF
+model.default 	= ../../data/models/OFF/camel.off
+//model.default 	= ../../data/models/OFF/ref_chinese_dragon.off
+
+shaderDir.depth_shadow_map 		= [shaders]/depth_shadow_map
+shaderDir.draw_texture 			= [shaders]/draw_texture
+#shaderDir.shadow_retroproj 	= [shaders]/shadow_retroproj
+#shaderDir.shadow_contour 		= [shaders]/shadow_contour
+shaderDir.draw_scene_with_scm 	= [shaders]/draw_scene_with_scm
+//
+shaderDir.vbo_dsm 				= [shaders]/vbo_dsm
+shaderDir.vbo_scm 				= [shaders]/vbo_scm
+
+// - Depth Shadow Map
+texture.dsm.width 		= 512
+texture.dsm.height		= 512
+//
+//texture.dsm.internalformat	= GL_DEPTH_COMPONENT32
+texture.dsm.internalformat	= GL_DEPTH_COMPONENT16
+//
+//texture.dsm.filter		= GL_NEAREST
+texture.dsm.filter		= GL_LINEAR
+//
+texture.dsm.wrapmode		= GL_CLAMP_TO_BORDER
+texture.dsm.border_color	= 1 0 0 0
+
+// - Shadow Clip Map
+texture.scm.width 		= 512
+texture.scm.height		= 512
+//
+//texture.scm.internalformat	= GL_INTENSITY_FLOAT16_ATI
+texture.scm.internalformat	= GL_RGBA_FLOAT32_ATI
+//
+//texture.scm.filter		= GL_LINEAR
+texture.scm.filter		= GL_NEAREST
+//
+//texture.scm.wrapmode		= GL_CLAMP
+texture.scm.wrapmode		= GL_CLAMP_TO_BORDER
+texture.scm.border_color	= 0 1 0 0
+
+// - Positions World Space
+texture.pws.width 		= 512
+texture.pws.height		= 512
+//
+//texture.pws.internalformat	= GL_RGBA_FLOAT16_ATI
+texture.pws.internalformat	= GL_RGBA_FLOAT32_ATI
+//
+//texture.pws.filter		= GL_LINEAR
+texture.pws.filter		= GL_NEAREST
+//
+texture.pws.wrapmode		= GL_CLAMP
+
+
+light_camera.draw		= false
+light_camera.coef_draw_default	= 0.05
+//
+light.jittered			= true
+// - rotation
+light.jittered.rotation 	= true
+light.jittered.max_angle	= 1.514159
+// - translation
+light.jittered.translation	= false
+light.jittered.scale_x		= +1.5
+light.jittered.scale_y		= +1.5
+
+draw_debug_textures		= false
+
+shadow.use_shadow_proj		= false
+//
+shadow.use_polygon_offset	= true
+shadow.polygon_offset.scale	= 8.0
+shadow.polygon_offset.bias	= 4.0
+//
+shadow.use_constant_depth_bias	= false
+shadow.constant_depth_bias	= -0.0
+//
+shadow.use_back_face		= false
+//
+timer_query.print		= false

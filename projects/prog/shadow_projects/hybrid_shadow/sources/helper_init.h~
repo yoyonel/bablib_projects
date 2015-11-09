@@ -1,0 +1,229 @@
+#ifndef __HELPER_VIEWER_INIT_H__
+#define __HELPER_VIEWER_INIT_H__
+
+#include <ColorTypes.h>
+#include <Message.h>
+
+// trisoup/
+#include <Tri.h>
+//#include <TriSoup.h>
+//#include "TriSoup_AOV.h"
+#include <VertexBuffer.h>
+
+void Viewer::initAll( bool bDestroy )
+{
+	// - TEXTURES
+	initTextures( bDestroy );
+	// - FRAMEBUFFERS
+	initFrameBuffers( bDestroy );
+	// - SHADERS
+	initShaders( bDestroy );
+	// -
+	initTimerQueryNV( bDestroy );
+	// -
+	initTriSoup( bDestroy );
+	// -
+	initVBO( bDestroy );
+
+	f_scale_vbo = 1.f;
+
+	b_is_init = true;
+}
+
+void Viewer::initTextures( bool bDestroy ) 
+{
+	if ( bDestroy ) {
+		destroyTextures();		
+	}
+
+	// -- first shadow depth texture
+	tex_shadow_map = Texture::createTex2DShadow( 
+		PARAM(int, texture.dsm.width), 			// width
+		PARAM(int, texture.dsm.height), 		// height
+		PARAM(GLenum, texture.dsm.internalformat), 	// internalFormat
+		PARAM(GLenum, texture.dsm.filter),		// texture filter
+		PARAM(GLenum, texture.dsm.wrapmode)		// wrap mode
+		);
+	tex_shadow_map.setBorderColor( PARAM(Float4, texture.dsm.border_color) );
+ 	MSG_CHECK_GL;
+
+	//
+	tex_edges_map = Texture::createTex2D( 
+				PARAM(int, 	texture.dsm.width), 
+				PARAM(int, 	texture.dsm.height), 		// meme taille que la DSM
+				PARAM(GLenum, 	texture.sm_edges.internalformat),
+				PARAM(GLenum, 	texture.sm_edges.filter),		// texture filter
+				PARAM(GLenum, 	texture.sm_edges.wrapmode)
+				);
+ 	MSG_CHECK_GL;
+}
+
+void Viewer::initFrameBuffers( bool bDestroy )
+{
+	if ( bDestroy ) {
+		destroyFrameBuffers();
+	}
+
+	// - FrameBuffer pour rendre la Depth Shadow Map (render_to_depth_texture)
+	fb_depth_shadow_map = FrameBuffer::create_TexDepth( &tex_shadow_map, false );
+	fb_depth_shadow_map.attachTex2D( GL_COLOR_ATTACHMENT0_EXT, &tex_edges_map, 0, false);
+	fb_depth_shadow_map.checkCompleteness(false);
+
+	resetFrameBuffers();
+
+ 	MSG_CHECK_GL;
+}
+
+void Viewer::initShaders( bool bDestroy ) 
+{
+	if ( bDestroy ) {
+		destroyShaders();
+	}
+	
+	LOADDIRSHADER( PARAM(QString, shaderDir.vbo_sv0), prog_vbo_sv0 );
+	LOADDIRSHADER( PARAM(QString, shaderDir.vbo_sv1), prog_vbo_sv1 );
+	//
+	LOADDIRSHADER( PARAM(QString, shaderDir.vbo), prog_vbo );
+	//
+	LOADDIRSHADER( PARAM(QString, shaderDir.vbo_dsm), prog_vbo_dsm );
+	//
+	LOADDIRSHADER( PARAM(QString, shaderDir.draw_texture), prog_draw_texture );
+	prog_draw_texture.addTexture("texture", &texture_active);
+
+	MSG_CHECK_GL;
+}
+	
+void Viewer::initTimerQueryNV( bool bDestroy )
+{
+	if ( bDestroy ) {
+		destroyTimerQueryNV();
+	}
+
+	MSG_CHECK_GL;
+}
+
+void Viewer::initTriSoup( bool bDestroy )
+{
+	if ( bDestroy ) {
+		destroyTriSoup();
+	}
+
+	ts = TriSoup::load( PARAM(QString, model.default), PARAM(bool, vbo.expand) ); // true => expand
+	ts->fitToUnitSphere();
+
+	MSG_CHECK_GL;
+}
+
+void Viewer::initVBO( bool bDestroy ) 
+{
+	if ( bDestroy ) {
+		destroyVBO();
+	}
+
+	{
+		// definition VBO avec classes génériques (bablib v2)
+		// pour une définition "intègre" OpenGL, il faut les customs attribs (génériques attribs) soient présents dans les shaders
+		// sinon il n'est pas possible d'attribuer un id pour les attributs (prog.getAttribID(#name) renvoie -1)
+		VERTEX_DATA_SUBCLASS(VDataDef,
+		    	DEF_ATTRIB(Vertex, float, 3)
+		    	DEF_ATTRIB(Normal, float, 3)
+		    	DEF_ATTRIB(Color,  float, 4)
+		    )
+	
+		VDataDef *vd = new VDataDef();
+
+		indexBuffer = new IndexBufferUI(3 * ts->nt);
+
+		vbo = new VertexDataBufferGL(vd, ts->nv);
+
+		for (int i=0; i<ts->nv; i++) {
+			vd->vertex.set(i, ts->vertex[i]);
+			vd->normal.set(i, ts->normal[i]);
+			Vec4 c = Vec4::random(0,1);
+			vd->color.set(i, c);
+
+		}
+
+		// remplissage et load de l'index buffer :
+		for (int i=0; i < ts->nt; i++) {
+			const int	indice_vertex0 = ts->tri[i].index[0],
+					indice_vertex1 = ts->tri[i].index[1],
+					indice_vertex2 = ts->tri[i].index[2];			
+			//
+			indexBuffer->set(3*i + 0, indice_vertex0);
+			indexBuffer->set(3*i + 1, indice_vertex1);
+			indexBuffer->set(3*i + 2, indice_vertex2);
+		}
+
+		vbo->load();
+		indexBuffer->load();
+	}
+
+	{
+		// definition VBO avec classes génériques (bablib v2)
+		// pour une définition "intègre" OpenGL, il faut les customs attribs (génériques attribs) soient présents dans les shaders
+		// sinon il n'est pas possible d'attribuer un id pour les attributs (prog.getAttribID(#name) renvoie -1)
+		VERTEX_DATA_SUBCLASS(VDataDef,
+		    	DEF_ATTRIB(Vertex, float, 3)		// Vertex i
+		    	DEF_ATTRIB(Normal, float, 3)		// Normal i
+			// - Vertex
+			DEF_ATTRIB_TEXCOORD(0, float, 3)	// Vertex (i+1)%2
+			DEF_ATTRIB_TEXCOORD(1, float, 3)	// Vertex (i+2)%2
+			// - Normals
+			DEF_ATTRIB_TEXCOORD(2, float, 3)	// Normal (i+1)%2
+			DEF_ATTRIB_TEXCOORD(3, float, 3)	// Normal (i+1)%2
+		)
+	
+		VDataDef *vd = new VDataDef();
+
+		indexBuffer_sv = new IndexBufferUI( 3 * ts->nt );
+
+		vbo_sv = new VertexDataBufferGL(vd, ts->nv );
+
+		for (int i=0; i<ts->nv; i++) {
+			vd->vertex.set(i, ts->vertex[i]);
+			vd->normal.set(i, ts->normal[i]);
+		}
+
+		// remplissage et load de l'index buffer :
+		for (int i=0; i < ts->nt; i++) {
+			const int	indice_vertex0 = ts->tri[i].index[0],
+					indice_vertex1 = ts->tri[i].index[1],
+					indice_vertex2 = ts->tri[i].index[2];			
+			//
+			indexBuffer_sv->set(3*i + 0, indice_vertex0);
+			indexBuffer_sv->set(3*i + 1, indice_vertex1);
+			indexBuffer_sv->set(3*i + 2, indice_vertex2);
+			//
+
+			// Vertex0
+			// - Positions des vertex consécutifs formant les 2 arêtes du triangle (possèdant le Vertex0)
+			vd->texCoord0.set( indice_vertex0, ts->vertex[indice_vertex1] );
+			vd->texCoord1.set( indice_vertex0, ts->vertex[indice_vertex2] );
+			// - Normales associées à ses vertex
+			vd->texCoord2.set( indice_vertex0, ts->normal[indice_vertex1] );
+			vd->texCoord3.set( indice_vertex0, ts->normal[indice_vertex2] );
+
+			// - Positions des vertex consécutifs formant les 2 arêtes du triangle (possèdant le Vertex1)
+			vd->texCoord0.set( indice_vertex1, ts->vertex[indice_vertex2] );
+			vd->texCoord1.set( indice_vertex1, ts->vertex[indice_vertex0] );
+			// - Normales associées à ses vertex
+			vd->texCoord2.set( indice_vertex1, ts->normal[indice_vertex2] );
+			vd->texCoord3.set( indice_vertex1, ts->normal[indice_vertex0] );
+
+			// - Positions des vertex consécutifs formant les 2 arêtes du triangle (possèdant le Vertex2)
+			vd->texCoord0.set( indice_vertex2, ts->vertex[indice_vertex0] );
+			vd->texCoord1.set( indice_vertex2, ts->vertex[indice_vertex1] );
+			// - Normales associées à ses vertex
+			vd->texCoord2.set( indice_vertex2, ts->normal[indice_vertex0] );
+			vd->texCoord3.set( indice_vertex2, ts->normal[indice_vertex1] );
+		}
+
+		vbo_sv->load();
+		indexBuffer_sv->load();
+	}
+
+	MSG_CHECK_GL;
+}
+
+#endif

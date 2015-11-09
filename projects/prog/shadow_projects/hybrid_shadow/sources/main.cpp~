@@ -1,0 +1,76 @@
+/****************************************************************************
+
+ Copyright (C) 2002-2007 Gilles Debunne (Gilles.Debunne@imag.fr)
+
+ This file is part of the QGLViewer library.
+ Version 2.2.6-3, released on August 28, 2007.
+
+ http://artis.imag.fr/Members/Gilles.Debunne/QGLViewer
+
+ libQGLViewer is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+
+ libQGLViewer is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with libQGLViewer; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+*****************************************************************************/
+
+#include "viewer_hs.h"
+//
+#include <qapplication.h>
+#include <QtGui>
+//
+#include <Params.h>
+
+int main(int argc, char** argv)
+{
+	// Read command lines arguments.
+	QApplication application(argc,argv);
+
+	// Add Stencil Buffer
+	if ( PARAM(bool, stencil_buffer.enable) ) {
+		QGLFormat format;
+		format.setStencil(true);
+		format.setStencilBufferSize( PARAM(int, stencil_buffer.bits) );
+		QGLFormat::setDefaultFormat(format);
+		//
+		fprintf(stdout, "# QGL - Stencil Enable: %s\n", format.stencil() ? "TRUE" : "FALSE" );
+		fprintf(stdout, "# QGL - Stencil Buffer Size: %d bits\n", format.stencilBufferSize());
+		fprintf(stdout, "\n\n");
+	}
+
+	// Instantiate the viewer.
+	Viewer viewer;
+
+	#if QT_VERSION < 0x040000
+		// Set the viewer as the application main widget.
+		application.setMainWidget(&viewer);
+	#else
+		viewer.setWindowTitle("### Hybrid Shadow - (QGLViewer+BabLib) ###");
+	#endif
+
+	viewer.setFocus();
+
+	/**/
+	// MOG: le restore .qglviewer.xml prend le dessus !
+	const int 	wScreen = QApplication::desktop()->width(),
+			hScreen = QApplication::desktop()->height();
+
+	viewer.resize(PARAM2(int, windowSize));
+	viewer.move((wScreen - viewer.width())/2, (hScreen - viewer.height())/2);
+	/**/
+
+	// Make the viewer window visible on screen.
+	viewer.show();
+
+	// Run main loop.
+	return application.exec();
+}

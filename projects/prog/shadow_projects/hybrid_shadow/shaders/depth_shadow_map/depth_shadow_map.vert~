@@ -1,0 +1,30 @@
+// Define used GLSL version
+#version 120
+
+// Uniform parameters (=global)
+//uniform mat4 modelViewMat;
+//uniform mat4 projectionMat;
+uniform mat4 T;
+
+varying vec4 texelLightSpace;
+
+flat varying vec4	texel0LightSpace,
+			texel1LightSpace,
+			texel2LightSpace;
+
+// Current vertex attributes
+//attribute vec4 vertexPosition;
+attribute vec4 	Vertex0,
+		Vertex1,
+		Vertex2;
+
+void main(void) {
+	texelLightSpace = T * gl_Vertex;
+
+	texel0LightSpace = T * Vertex0;
+	texel1LightSpace = T * Vertex1;
+	texel2LightSpace = T * Vertex2;
+	
+	gl_Position = ftransform();
+	
+}
