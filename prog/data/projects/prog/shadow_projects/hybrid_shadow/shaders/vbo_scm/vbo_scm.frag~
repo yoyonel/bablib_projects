@@ -1,0 +1,924 @@
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// CONSTANTS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+#define DEPTH_BIAS	(-0.015 * 4.)
+
+#define GREEN		vec4( 0, 1, 0, 0 )
+#define RED		vec4( 1, 0, 0, 0 )
+#define BLUE		vec4( 0, 0, 1, 0 )
+
+#define EPSILON		(0.000001)		//@@ trouver l'epsilon des floats (autour de 0.)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// MACROS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+#define IN_PENUMBRA(_coef_shadow, _seuil)	( ( (_coef_shadow) >= (_seuil) ) && ( (_coef_shadow) <= (1.0 - _seuil) ) )
+#define IN_HARDSHADOW(_shadow, _seuil) 		( ( ( (_shadow) < (_seuil) ) ) ) 
+#define PROJECTIVE_TO_TEXTURE_SPACE_V4( _texel )	( ((_texel) + vec4(1.)) * 0.5)
+#define TEXEL_IS_OUTSIDE_TEXTURE_SPACE( _texel ) 	( ((_texel).x<0.0) || ((_texel).x>+1.0) || ((_texel).y<0.0) || ((_texel).y>+1.0))
+#define NORMALIZED_VERTEX( _vertex )	( (_vertex) / (_vertex).w )
+#define PROJECT_VERTEX(_mat, _vertex)	( NORMALIZED_VERTEX( (_mat) * (_vertex) ) )
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// CONSTANTS FOR METHODS CHOOSE
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+//#define USE_SHADOW_PROJ
+#define USE_SHADOW_PCF		0
+#define USE_SHADOW_BICUBIC	1
+
+#define SHADOW_TECHNIQUE	USE_SHADOW_PCF
+//#define SHADOW_TECHNIQUE	USE_SHADOW_BICUBIC
+
+//#define CLAMP_COEF_SHADOW
+//#define USE_RENDER_BACK_FACE	// render the back faces occluder in the shadow map
+
+// -------------------------------------
+// - Activate Temporal Confidence Method
+// -------------------------------------
+#define USE_TEMPORAL_CONFIDENCE
+// -------------------------------------
+
+#define	USE_DYNAMIC_COEF_POWER_FUNCTION
+//#define CLAMP_COEF_CONFIDENCE
+//#define USE_RADIUS_CONFIDENCE
+//#define REMAP_COEF_CONFIDENCE
+//#define USE_EXPERIMENTAL_CORRECTION_FOR_MOVEMENT_DIFF_VIS
+//#define USE_EXPERIMENTAL_CORRECTION_FOR_MOVEMENT_DIFF_POS_OCC
+
+// -------------------------------------
+// - SUBPIXEL - Tests
+// -------------------------------------
+// relié directement avec [draw_scene_with_scm.frag]
+#define USE_EXPERIMENTAL_SUBPIXEL_SHADOWED
+//#define DRAW_SUBPIXEL_TESTS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// CONSTANTS DRAW DEBUG
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+//#define DRAW_GRID
+//#define DRAW_CONFIDENCE
+//#define DRAW_FILTER_COLOR
+//#define DRAW_NEW_TEXEL
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// COEFFICIENTS FOR OPTIMIZATIONS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+float 	clamp_coef_shadow_seuil 	= 0.09;
+float	new_texel_distance_seuil	= 0.01; 	// si valeur trop grande, les pixels de bord prennent le dessus
+// -------------------------------------
+// - Power Function Confidence
+// -------------------------------------
+#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+	float 	init_coef_power_function	= 1.0;	// initial value
+#else
+	float 	init_coef_power_function	= 7.0;	// initial value
+#endif
+float	step_coef_power_function	= 0.5;	// increment value
+float	max_coef_power_function		= 25.0;	// max value
+float	coef_power_function		= init_coef_power_function;	// current value
+// -------------------------------------
+float	clamp_confidence_seuil 		= 0.85;
+//-
+float 	radius_conf 			= 0.9;
+float 	coef_conf_min 			= 0.6;
+//- USE_EXPERIMENTAL_CORRECTION_FOR_MOVEMENT_DIFF_VIS
+float	coef_diff_for_new_texel		= 0.8;
+//-
+float 	coef_diff_distance_receiver_occluder = .5;
+//
+float 	f_coef_distance_to_be_too_closer = 0.01;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// Uniform parameters (=global)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - SAMPLERS (=tex_*)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -- Depth Shadow Map
+uniform sampler2DShadow	tex_depth_shadow_map;
+// -------------------------------------
+// -- History Buffers
+// -------------------------------------
+// --- 
+uniform sampler2D	tex_history_visibility;
+// ---
+uniform sampler2D	tex_history_positions;
+// ---
+uniform sampler2D	tex_history_positions_occluders;
+// -------------------------------------
+// -- Occluders Informations Buffers
+// -------------------------------------
+// -- Vertex formant le triangle occulteur qui a généré (ou est support) du texel occluder (dans la DSM)
+uniform sampler2D	tex_sm_triangle_vertex0, tex_sm_triangle_vertex1, tex_sm_triangle_vertex2;
+// --
+uniform sampler2D	tex_sm_pows;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - Uniform Mat4 (=u_m4_*)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -- Light to Projective Light Space
+uniform	mat4	u_m4_light_to_proj;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - Uniform Vec2 (=u_v2_*)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -- Dimensions (width, height) de la texture: Depth Shadow Map
+uniform vec2 	u_v2_size_dsm;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - Uniform float (=u_f_*)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -- Constant bias for shadow test
+uniform float 	coef_depth_bias;
+
+// Varying parameters (=vertex to fragment shader)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - Varying Vec4 (=v_v4_*)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------//
+// -- Texel Position in Projective Light Space
+varying vec4 v_v4_texel_in_proj_light;
+// -- Texel Position in World Space
+varying vec4 v_v4_texel_in_world;
+// -- Texel in Light Space
+varying	vec4 v_v4_texel_in_light;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - PREVIOUS FRAME (=*_prev)
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// -- Texel Position in Projective Eyes Space (previous frame)
+varying vec4 v_v4_texel_in_eyes_proj_prev;
+// -- Texel Position in Projective Light Space (previous frame)
+varying vec4 v_v4_texel_in_light_proj_prev;
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+varying vec3 v_v3_normal;
+varying vec3 v_v3_normal_in_object;
+varying vec3 v_v3_lightDir_in_object;
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - PROTOTYPES FUNCTIONS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+vec4 	compute_texel_in_texture_light( in vec4 _v4_texel_in_light );
+float 	compute_shadow( in sampler2DShadow _tex_depth_shadow_map, in vec4 _v4_v4_texel_in_light_texture, in vec2 _u_v2_size_dsm );
+void	update_variables();
+//
+vec4 	interpolate_bicubic_fast(sampler2D tex, vec2 _texCoord, vec2 _sizeTexture);
+vec4 	interpolate_bicubic_fast(sampler2DShadow tex_depth_map, vec3 _texCoord, vec2 _sizeTexture);
+float 	Compute_Grid( vec2 v4_texel_in_light_texture, vec2 _sizeTexture );
+vec4	filterColor( in float coef_shadow );
+//
+float 	Compute_Confidence( vec4 v4_texel_in_light_texture, vec2 _sizeTexture );
+//
+void	compute_subpixel( 
+		in vec4 v4_texel_in_light_texture, in vec4 v4_texel_in_light_proj, in vec2 _sizeTexture, in vec4 v_v4_texel_in_light,
+		out bool subpixel_proj_in_triangle, out bool pixel_is_shadowed_by_plane, out bool pixels_RO_are_closer
+	);
+void	compute_subpixel_test1();
+void 	compute_subpixel_test2();
+//
+bool 	Point_In_Triangle_2D( vec2 A, vec2 B, vec2 C, vec2 P);
+float 	compute_hermite(in float _t, in float _p0, in float _p1, in float _m0, in float _m1);
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - GLOBALS VARIABLES
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+vec4 	v4_texel_in_light_texture;
+vec4 	v4_texel_in_light_proj;
+vec4 	v4_texel_in_proj_eyes_prev;
+vec4	v4_texel_in_eyes_texture_prev;
+vec4	v4_texel_in_world_prev;
+vec4	v4_visibility_prev;
+vec4	v4_texel_occluder_in_world;
+vec4	v4_texel_occluder_in_world_prev;
+vec4 	v4_texel_in_world;
+//
+float 	f_distance_between_texels_receivers;
+float 	f_distance_between_receiver_occluder;
+float 	f_distance_between_receiver_occluder_prev;
+float 	f_diff_distance_between_receiver_occluder;
+//
+float 	f_coef_shadow;
+//
+bool 	b_is_new_texel;
+bool	b_is_new_receiver;
+bool	pixels_RO_are_closer;
+bool 	pixel_shadowed_by_texel_sm;
+bool 	subpixel_proj_in_triangle;
+bool	pixel_is_shadowed_by_plane;
+//
+vec3	v3_normal_eyes;
+float	f_coef_lighting;
+//
+float 	confidence_sm;
+float	tsm;
+float	weight;
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// - MAIN FUNCTION
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+void main(void) {
+	vec4 	out_color;
+
+	v4_texel_in_light_texture = compute_texel_in_texture_light( v_v4_texel_in_proj_light);
+	
+	f_coef_shadow = compute_shadow( tex_depth_shadow_map, v4_texel_in_light_texture, u_v2_size_dsm );
+
+	out_color = vec4( f_coef_shadow );	
+
+	// - UPDATE variables associées a l'algo. Temporal Confidence
+	update_variables();
+
+	#ifdef USE_TEMPORAL_CONFIDENCE
+		confidence_sm = 0.0;
+		tsm = 0.0;
+		weight = 0.0;
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+		if (b_is_new_texel) {
+			tsm = f_coef_shadow;
+			#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+				coef_power_function = init_coef_power_function;
+			#endif
+		}
+		else {
+			#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+				coef_power_function = v4_visibility_prev.z + step_coef_power_function;
+				coef_power_function = min( max_coef_power_function, coef_power_function );
+			#endif
+
+			confidence_sm = Compute_Confidence( v4_texel_in_light_texture, u_v2_size_dsm ); 
+			// ---- Calcul du poids
+			weight = pow( confidence_sm, coef_power_function );
+			// ---- Mix temporel de la visibilité
+			tsm = mix( v4_visibility_prev.x, f_coef_shadow, weight );
+			//tsm = f_coef_shadow;
+		}
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+		// Remet à "0" la confidence si
+		// le texel n'est pas dans l'ombre ou pénombre
+		// et que sa valeur de confidence (en moyenne) est "assez" élevés
+//		coef_power_function = !(IN_PENUMBRA(f_coef_shadow, EPSILON) || IN_HARDSHADOW(f_coef_shadow, EPSILON)) &&
+//					v4_visibility_prev.z > max_coef_power_function / 1.05 ? init_coef_power_function : coef_power_function;
+
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------		 
+		// - Update History Buffers
+		out_color = vec4(
+				tsm, 
+				float(b_is_new_texel), //f_distance_between_texels_receivers, 			 
+				coef_power_function, //f_distance_between_receiver_occluder,
+				pixels_RO_are_closer
+				);
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------		 
+		//- Update History Buffers
+		// -- Positions Receiver
+		gl_FragData[1] = v4_texel_in_world; 	// update history position
+		// -- Positions Casters (Occluders)
+		gl_FragData[2] = v4_texel_occluder_in_world;
+		// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	#endif
+
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	// SUBPIXEL_SHADOWED
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------		 		 	
+	#ifdef USE_EXPERIMENTAL_SUBPIXEL_SHADOWED
+		compute_subpixel( 
+				// in
+				v4_texel_in_light_texture, 
+				v4_texel_in_light_proj, 
+				u_v2_size_dsm,
+				v_v4_texel_in_light,
+				// out
+				subpixel_proj_in_triangle, 
+				pixel_is_shadowed_by_plane,
+				pixels_RO_are_closer
+				);
+		//
+		pixel_shadowed_by_texel_sm = IN_PENUMBRA(f_coef_shadow, EPSILON) || IN_HARDSHADOW(f_coef_shadow, EPSILON);
+
+		coef_power_function -= !pixel_shadowed_by_texel_sm ? step_coef_power_function : 0.;
+
+		compute_subpixel_test1();
+//		compute_subpixel_test2();
+
+
+		#ifdef DRAW_SUBPIXEL_TESTS
+				out_color.x = float(pixels_RO_are_closer);
+				out_color.y = float(pixel_is_shadowed_by_plane);
+				out_color.z = float(pixel_shadowed_by_texel_sm);
+				out_color.w = float(subpixel_proj_in_triangle);
+		#else
+				// - Update History Buffers
+				out_color = vec4(
+						tsm, 
+		//				f_diff_distance_between_receiver_occluder, //float(b_is_new_receiver), //f_distance_between_texels_receivers,
+						float(b_is_new_texel),
+						coef_power_function,
+						f_coef_lighting
+						);
+		#endif
+	#endif
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------		 
+
+	#ifdef DRAW_CONFIDENCE
+		const float coef_confidence_color = 1.0;
+		vec4 confidence_color = vec4(GREEN + RED) * confidence_sm * coef_confidence_color;
+		// - on veut afficher la grille sur les texels ombrés
+		out_color += f_coef_shadow < (1-EPSILON) ? (1. - f_coef_shadow) * confidence_color : vec4(0);
+	#endif
+
+	// - DEBUG - FILTERS (Clamp, ISOs)
+	#ifdef DRAW_FILTER_COLOR
+		const float coef_iso_color = 1.0;
+		vec4 iso_color = filterColor( f_coef_shadow ) * coef_iso_color;
+		out_color = length(iso_color) >= EPSILON ? iso_color : out_color;
+	#endif
+
+	// - DEBUG - GRID
+	#ifdef DRAW_GRID
+		const float coef_grid_color = 1.0;
+		float grid_sm = Compute_Grid( vec2(v4_texel_in_light_texture), u_v2_size_dsm );
+		//out_color += coef_grid_color * ( /**(out_color.x >= -EPSILON) && /**/ (out_color.x <= EPSILON*20000 ) ? (BLUE + GREEN) * grid_sm : out_color);
+		vec4 grid_color = (BLUE + GREEN) * grid_sm * coef_grid_color;
+		// - on veut afficher la grille sur les texels ombrés
+		out_color += f_coef_shadow < (1-EPSILON) ? (1. - f_coef_shadow) * grid_color : vec4(0);
+	#endif
+
+	// Write result
+	// gl_FragData[0].x : Visibility Buffer
+	gl_FragData[0] = out_color;
+}
+
+void update_variables()
+{
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	// Updates Globals Variables 
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	v4_texel_in_proj_eyes_prev = v_v4_texel_in_eyes_proj_prev / v_v4_texel_in_eyes_proj_prev.w; // normalize projeci
+	v4_texel_in_eyes_texture_prev = PROJECTIVE_TO_TEXTURE_SPACE_V4(v4_texel_in_proj_eyes_prev); // [-1, +1] -> [0.0, 1.0] (Screen Space -> Texture Space)
+	// - Previous Position Texel
+	v4_texel_in_world_prev 	= texture2D( tex_history_positions, 	v4_texel_in_eyes_texture_prev.xy );	// previous position 		in WorldSpace
+	// - Previous Visibility
+	v4_visibility_prev	= texture2D( tex_history_visibility,	v4_texel_in_eyes_texture_prev.xy );	// previous visibility 		in WorldSpace
+	// - Positions Occluders (frame courante, et précédente)
+	v4_texel_occluder_in_world	= texture2D( tex_sm_pows,			v4_texel_in_light_texture.xy );		// actual   position occluder 	in WorldSpace	
+	v4_texel_occluder_in_world_prev	= texture2D( tex_history_positions_occluders,	v4_texel_in_eyes_texture_prev.xy );	// previous position occluder 	in WorldSpace
+	// - Position Texel in World Space
+	v4_texel_in_world = v_v4_texel_in_world / v_v4_texel_in_world.w;
+	// - Distance entre le texel courant et le texel de la frame précédente
+	f_distance_between_texels_receivers = distance(v_v4_texel_in_world, v4_texel_in_world_prev);
+	// - Distance entre le texel-receiver et le texel-occluder
+	f_distance_between_receiver_occluder 		= distance( v4_texel_in_world, 		v4_texel_occluder_in_world);
+	f_distance_between_receiver_occluder_prev 	= distance( v4_texel_in_world_prev, 	v4_texel_occluder_in_world_prev );
+	f_diff_distance_between_receiver_occluder 	= abs(f_distance_between_receiver_occluder - f_distance_between_receiver_occluder_prev);
+
+	v3_normal_eyes 	= normalize(v_v3_normal);
+	f_coef_lighting = max(0.0, dot(normalize(v_v3_lightDir_in_object), v_v3_normal_in_object));
+//	f_coef_lighting = 1.;
+
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	// DETECTING NEW TEXEL
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+	b_is_new_receiver 	= (f_distance_between_texels_receivers >= new_texel_distance_seuil);
+//	bool	b_is_new_receiver_occluder = (f_diff_distance_between_receiver_occluder >= coef_diff_distance_receiver_occluder);
+	bool	b_is_new_receiver_occluder = false;
+	//
+	#ifdef USE_EXPERIMENTAL_CORRECTION_FOR_MOVEMENT_DIFF_VIS
+		float 	variance_visibility	= abs(f_coef_shadow - v4_visibility_prev.x);
+		bool 	variance		= variance_visibility >= (coef_diff_for_new_texel - EPSILON);
+			b_is_new_receiver 	= IN_PENUMBRA(v4_visibility_prev.x, EPSILON) && IN_PENUMBRA(f_coef_shadow, EPSILON) ? b_is_new_receiver : b_is_new_receiver || variance;
+	#endif
+	//
+	b_is_new_texel	= 		b_is_new_receiver
+				|| 	TEXEL_IS_OUTSIDE_TEXTURE_SPACE( v4_texel_in_eyes_texture_prev )
+				|| 	b_is_new_receiver_occluder
+//				|| 	abs(v3_normal_eyes.z) <= 0.05;
+				|| 	f_coef_lighting < 0.05
+//				|| 	IN_HARDSHADOW(f_coef_shadow, EPSILON)
+				;
+	// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+}
+
+float compute_shadow( in sampler2DShadow _tex_depth_shadow_map, in vec4 _v4_v4_texel_in_light_texture, in vec2 _u_v2_size_dsm )
+{
+	float shadow;
+
+	#if (SHADOW_TECHNIQUE == USE_SHADOW_PCF)
+		// Depth Test (ShadowMap)
+		// - with PCF 2x2 if filter_mode = GL_LINEAR, work on ATI)
+		// - NEAREST mode if filter_mode = GL_NEAREST	
+		float shadow_PCF;
+		#ifdef USE_SHADOW_PROJ
+			shadow_PCF = shadow2DProj( _tex_depth_shadow_map, _v4_v4_texel_in_light_texture ).r;	
+		#else
+	 		shadow_PCF = shadow2D( _tex_depth_shadow_map, _v4_v4_texel_in_light_texture.xyz ).r;	
+	 	#endif
+		shadow = shadow_PCF;
+	#elif (SHADOW_TECHNIQUE == USE_SHADOW_BICUBIC)
+		float shadow_BiCubic = interpolate_bicubic_fast( _tex_depth_shadow_map, _v4_v4_texel_in_light_texture.xyz, _u_v2_size_dsm ).x;
+		shadow = shadow_BiCubic;
+	#endif
+
+	#ifdef CLAMP_COEF_SHADOW
+		shadow = shadow >= clamp_coef_shadow_seuil ? 1 : 0;
+	#endif
+
+	return	shadow;
+}
+
+vec4 compute_texel_in_texture_light( in vec4 _v4_texel_in_light )
+{
+	vec4 v4_texel_in_light_texture;
+
+	// Normalisation manuelle (TODO: voir shadow2DProj)
+	v4_texel_in_light_proj = _v4_texel_in_light / _v4_texel_in_light.w;
+
+	#ifdef USE_SHADOW_PROJ
+		v4_texel_in_light_texture = _v4_texel_in_light;
+		// Bias Uniform (non normalisé)
+		v4_texel_in_light_texture.z	+= coef_depth_bias * _v4_texel_in_light.w;
+	#else
+		// Bias Uniform (TODO: voir Gradient Shadow Map)
+		v4_texel_in_light_proj.z += coef_depth_bias;
+		// Light_Space to Texture_Space(_light)
+		v4_texel_in_light_texture = (v4_texel_in_light_proj + vec4(1.) ) * vec4(0.5);
+	#endif
+
+	return v4_texel_in_light_texture;
+}
+
+bool Point_In_Triangle_2D( in vec2 A, in vec2 B, in vec2 C, in vec2 P) {
+	// (*): Dépendant de P
+
+	// Compute vectors        
+	vec2 v0 = C - A;	// [A, C]
+	vec2 v1 = B - A;	// [A, B]
+	//
+	vec2 v2 = P - A;	// [A, P]	(*)
+
+	// Compute dot products
+	float dot00 = dot(v0, v0);	// [A, C]
+	float dot01 = dot(v0, v1);	// [A, B, C]
+	float dot11 = dot(v1, v1);	// [A, B]
+	//
+	float dot02 = dot(v0, v2);	// [A, C, P]	(*)
+	float dot12 = dot(v1, v2);	// [A, B, P]	(*)
+
+	// Compute barycentric coordinates
+	float invDenom = 1. / (dot00 * dot11 - dot01 * dot01);	// [A, B, C]
+	//
+	float u = (dot11 * dot02 - dot01 * dot12) * invDenom;	// [A, B, C, P]	(*)
+	float v = (dot00 * dot12 - dot01 * dot02) * invDenom;	// [A, B, C, P]	(*)
+
+	// Check if point is in triangle
+	return 	(u >= (0. + EPSILON)) && 
+		(v >= (0. + EPSILON)) && 
+		((u + v) <= (1. - EPSILON));	// [A, B, C, P]	(*)
+}
+
+vec3 Line_Intersect_Triangle( vec3 A, vec3 B, vec3 C, vec3 P0, vec3 P1) 
+{
+	vec3    u, v, n;             // triangle vectors
+	vec3    dir, w0, w;          // ray vectors
+	float   r, a, b;             // params to calc ray-plane intersect
+	vec3	I;
+
+	// get triangle edge vectors and plane normal
+	u = B - A;
+	v = C - A;
+	n = cross(u, v);             // cross product
+//	if (n == (Vector)0)            // triangle is degenerate
+//	return -1;                 // do not deal with this case
+
+
+	dir = P1 - P0;             // ray direction vector
+	w0 = P0 - A;
+	a = -dot(n,w0);
+	b = dot(n,dir);
+//	if (fabs(b) < SMALL_NUM) {     // ray is parallel to triangle plane
+//	if (a == 0)                // ray lies in triangle plane
+//	    return 2;
+//	else return 0;             // ray disjoint from plane
+//	}
+
+	// get intersect point of ray with triangle plane
+	r = a / b;
+//	if (r < 0.0)                   // ray goes away from triangle
+//	return 0;                  // => no intersect
+	// for a segment, also test if (r > 1.0) => no intersect
+
+	I = P0 + r * dir;           // intersect point of ray and plane
+
+	return I;
+}
+
+float Compute_Confidence( vec4 v4_texel_in_light_texture, vec2 _sizeTexture )
+{
+	float tex_width = _sizeTexture.x;
+	float tex_height = _sizeTexture.y;
+	
+	// MOG: réfléchir à ce que ça fait ce calcul !!!
+	// Grille de projection de la shadow map (i.e grille de rasterisation projetée sur la scene)
+	/**
+	vec2 confidence_sm = v4_texel_in_light_texture * _sizeTexture;
+	confidence_sm = abs( floor(confidence_sm - vec2(0.5)) - 0.5);
+	//
+	float coef_confidence 	= 1. - max(confidence_sm.x, confidence_sm.y) * 2.0;
+	/**/
+	//
+	
+	// Grille de projection de la shadow map (i.e grille de rasterisation projetée sur la scene)
+	/**/
+	vec2 confidence_sm 	= vec2(v4_texel_in_light_texture) * _sizeTexture;
+	vec2 confidence_sm_bias = confidence_sm - vec2(0.5) * 0;	// erreur de MERDE: pas de bias !!!
+	confidence_sm 		= abs((confidence_sm_bias - floor(confidence_sm_bias)) - vec2(0.5));
+	//
+	float coef_confidence 	= 1. - max(confidence_sm.x, confidence_sm.y) * 2.0;
+	/**/
+	
+	#ifdef CLAMP_COEF_CONFIDENCE
+		coef_confidence = coef_confidence < clamp_confidence_seuil ? 0.0 : 1.0;
+	#endif
+
+//	#ifdef USE_RADIUS_CONFIDENCE
+//		float l_conf_sm 	= length(confidence_sm);
+//		//coef_confidence 	= 1.0 - (l_conf_sm <= radius_conf ? smoothstep(0., radius_conf, l_conf_sm) : 1.0);*
+////		coef_confidence = 1.0 - l_conf_sm/sqrt(2.);
+//		coef_confidence = 1. - smoothstep(0., 1.0, (l_conf_sm/sqrt(2.)));
+////		coef_confidence = compute_hermite( coef_confidence, 0.0, 1.0, 0.0, 0.0);
+//	#endif
+
+	#ifdef USE_RADIUS_CONFIDENCE
+		float l_conf_sm 	= length(confidence_sm);
+		float f_coef_confidence_radius = 1. - 2.*l_conf_sm;
+		coef_confidence = l_conf_sm < 0.2 ? f_coef_confidence_radius : coef_confidence;
+		float f_coef_hermite = compute_hermite( coef_confidence, 0.0, 1.0, 0.5, 1.0);
+		coef_confidence = clamp( f_coef_hermite, 0., 1. );
+	#endif
+
+	#ifdef REMAP_COEF_CONFIDENCE
+		coef_confidence = abs(coef_confidence - coef_conf_min) / (1.0 - coef_conf_min);
+	#endif
+
+//	coef_confidence = 0.001;
+
+	return coef_confidence;
+}
+
+#define HERMITE_H00(t) ( +2.*pow((t), 3) - 3.*pow((t), 2) 	+ 1 )
+#define HERMITE_H10(t) ( +1.*pow((t), 3) - 2.*pow((t), 2) + t )
+#define HERMITE_H01(t) ( -2.*pow((t), 3) + 3.*pow((t), 2) )
+#define HERMITE_H11(t) ( +1.*pow((t), 3) - 1.*pow((t), 2) )
+
+float compute_hermite(in float _t, in float _p0, in float _p1, in float _m0, in float _m1)
+{
+	return 	HERMITE_H00(_t) * _p0 +
+		HERMITE_H10(_t) * _m0 +
+		HERMITE_H01(_t) * _p1 +
+		HERMITE_H11(_t) * _m1;
+}
+
+void 	compute_subpixel(
+		in vec4 _v4_texel_in_light_texture, in vec4 _v4_texel_in_light_proj, in vec2 _sizeTexture, in vec4 _v4_texel_in_light,
+		out bool subpixel_proj_in_triangle, out bool pixel_is_shadowed_by_plane, out bool pixels_RO_are_closer
+	)
+{
+	vec4 v4_vertex0_in_light = texture2D(tex_sm_triangle_vertex0, vec2(_v4_texel_in_light_texture) );
+	vec4 v4_vertex1_in_light = texture2D(tex_sm_triangle_vertex1, vec2(_v4_texel_in_light_texture) );
+	vec4 v4_vertex2_in_light = texture2D(tex_sm_triangle_vertex2, vec2(_v4_texel_in_light_texture) );
+
+	vec3 	v3_vdir_v0v1_light = (v4_vertex1_in_light - v4_vertex0_in_light).xyz;
+	vec3 	v3_vdir_v0v2_light = (v4_vertex2_in_light - v4_vertex0_in_light).xyz;
+	vec3	v3_normal_triangle_light = cross(v3_vdir_v0v1_light, v3_vdir_v0v2_light);
+	
+	float 	dot_pixel_plane  = dot( (v4_vertex0_in_light - _v4_texel_in_light).xyz, v3_normal_triangle_light );
+	#ifdef USE_RENDER_BACK_FACE
+		dot_pixel_plane *= -1;
+	#endif
+	pixel_is_shadowed_by_plane = (dot_pixel_plane >= (0.0 + 1.*EPSILON));
+
+	// - utilisation d'un seuil de distance entre le texel-receiver et texel-occulteur
+	// - s'ils sont trop proches, on considère qu'il y a auto-ombrage
+	pixels_RO_are_closer = f_distance_between_receiver_occluder <= f_coef_distance_to_be_too_closer;
+
+	v4_vertex0_in_light = PROJECT_VERTEX( u_m4_light_to_proj, v4_vertex0_in_light );
+	v4_vertex1_in_light = PROJECT_VERTEX( u_m4_light_to_proj, v4_vertex1_in_light );
+	v4_vertex2_in_light = PROJECT_VERTEX( u_m4_light_to_proj, v4_vertex2_in_light );
+		
+	subpixel_proj_in_triangle = Point_In_Triangle_2D( v4_vertex0_in_light.xy, v4_vertex1_in_light.xy, v4_vertex2_in_light.xy, _v4_texel_in_light_proj.xy );
+
+//	float	aire_triangle 	= 0.5 * length(cross(v3_vdir_v0v1_light, v3_vdir_v0v2_light));	
+//	float 	aire_texel	= pow( 1.0/_sizeTexture.x, 2. );
+//	coef_confidence = (subtexel_shadowed ? 1. : coef_confidence);
+//	coef_confidence = aire_triangle / aire_texel;
+//	return subtexel_shadowed;
+}
+
+void compute_subpixel_test1()
+{
+//LIT:
+//	pixel_shadowed_by_texel_sm 
+//		subpixel_proj_in_triangle
+//			!pixel_is_shadowed_by_plane
+//		!subpixel_proj_in_triangle
+//			pixel_is_shadowed_by_plane
+//				pixels_RO_are_closer
+//			!pixel_is_shadowed_by_plane
+
+		if ( 	pixel_shadowed_by_texel_sm 
+			//&& !b_is_new_texel 
+			)
+		{
+			// + RED
+			if ( subpixel_proj_in_triangle )
+			{
+				// + GREEN (+ RED)
+				if ( pixel_is_shadowed_by_plane )
+				{
+					// + BLUE (+ GRENN + RED) = WHITE
+					// => pixel-eyes 	est ombré par un texel-sm
+					// => pixel-projeté 	est inclu la projection du triangle occulteur (sur le near plane de camera_light)
+					// => pixel-world	est du coté "ombré" du plan support du triangle-occulteur
+					// <=> le pixel-world est ombré par le triangle-occulteur (world space)
+					// <=> "ombré"
+					#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+//						coef_power_function = max_coef_power_function;
+//						coef_power_function += step_coef_power_function;
+					#endif
+//					tsm = mix( v4_visibility_prev.x, 0.0, weight );
+				}
+				else
+				{
+					// (+ GREEN + RED) = YELLOW
+					// => pixel-eyes 	est ombré par un texel-sm
+					// => pixel-projeté 	est inclue la projection du triangle occulteur (sur le near plane de camera_light)
+					// => pixel-world	est du coté "non-ombré" du plan support du triangle 
+					// <=> le pixel-world est n'est pas ombré par le triangle-occulteur (world space)
+					// <=> Devrait correspondre au texel-eyes en auto-ombrage erroné
+					// <=> ! "non-ombré" !
+					#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+//						coef_power_function = max_coef_power_function;
+//						coef_power_function += step_coef_power_function;
+					#endif
+					tsm = mix( v4_visibility_prev.x, 1.0, weight );
+				}
+			}
+			else
+			{
+				// (+ RED )
+				if ( pixel_is_shadowed_by_plane )
+				{
+					if ( pixels_RO_are_closer )
+					{
+						// +BLUE +GREEN = TURQUOISE
+						// => pixel-eyes 	est ombré par un texel-sm
+						// => pixel-projeté 	est n'est pas inclu la projection du triangle-occulteur (sur le near plane de camera_light)
+						// => pixel-world	est du cote "ombré" du plan support du triangle-occulteur (associcié au texel-sm)
+						// => pixel-eyes	est "trop près" du texel-SM
+						// <=> On peut le considérer comme "bad-self-shadow" car il est ombré (texel-sm, plane support du triangle-occulteur) mais est très près (trop près)
+						// <=> du plan-occulteur (i.e triangle-occulteur, micro-quad-occulteur)
+						// <=> ? "non-ombré" ?
+						#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+//							coef_power_function = init_coef_power_function;
+							coef_power_function -= step_coef_power_function;
+						#endif
+						tsm = mix( v4_visibility_prev.x, 1.0, weight );
+					}
+					else
+					{
+						// + BLUE (+RED) = PURPLE
+						// => pixel-eyes 	est ombré par un texel-sm
+						// => pixel-projeté 	est n'est pas inclu la projection du triangle-occulteur (sur le near plane de camera_light)
+						// => pixel-world	est du cote "ombré" du plan support du triangle-occulteur (associcié au texel-sm)
+						// => pixel-eyes	n'est pas "trop près" du texel-SM
+						// <=> Devrait correspondre au texel-eyes dont on ne dispose pas (encore) d'assez d'information pour établir son status
+						// <=> ? "ombré" ?
+						#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+//							coef_power_function = init_coef_power_function;
+//							coef_power_function -= step_coef_power_function;
+						#endif
+//						tsm = mix( v4_visibility_prev.x, 0.0, weight );
+					}
+				}
+				else
+				{
+					// (+RED) = RED
+					// => pixel-eyes 	est ombré par un texel-sm
+					// => pixel-projeté 	est n'est pas inclu la projection du triangle-occulteur (sur le near plane de camera_light)
+					// => pixel-world	est du cote "non-ombré" du plan support du triangle-occulteur (associcié au texel-sm)
+					// <=> Devrait correspondre au texel-eyes dont on ne dispose pas (encore) d'assez d'information pour établir son status
+					// <=> ? "non-ombré" ?
+					#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+//							coef_power_function = init_coef_power_function;
+							coef_power_function -= step_coef_power_function;
+					#endif
+					tsm = mix( v4_visibility_prev.x, 1.0, weight );
+				}
+			}
+		}
+		else
+		{
+			// Object_Color grisé
+			// => pixel-eyes	n'est pas ombré par un texel-sm
+			// <=> "non-ombré"
+//			tsm = mix( v4_visibility_prev.x, 1.0, weight );
+		}
+}
+
+void compute_subpixel_test2()
+{
+	if (pixel_shadowed_by_texel_sm)
+	{
+		if (subpixel_proj_in_triangle)
+		{
+			if (pixel_is_shadowed_by_plane)
+			{
+//				out_color = RED;
+			}
+			else
+			{
+//				out_color = GREEN;
+				tsm = mix( v4_visibility_prev.x, 1.0, weight );
+			}
+		}
+		else
+		{
+			if (pixel_is_shadowed_by_plane)
+			{
+				if (pixels_RO_are_closer)
+				{
+//					out_color = BLUE;
+
+					#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+						coef_power_function -= step_coef_power_function;
+					#endif
+					// ---- Calcul du poids
+					weight = pow( confidence_sm, coef_power_function );
+
+					tsm = mix( v4_visibility_prev.x, 1.0, weight );
+				}
+				else
+				{
+//					out_color = YELLOW;
+//					tsm = mix( v4_visibility_prev.x, f_coef_shadow, weight );
+				}
+			}
+			else
+			{
+				if (pixels_RO_are_closer)
+				{
+//					out_color = BLUE;
+
+					#ifdef USE_DYNAMIC_COEF_POWER_FUNCTION
+						coef_power_function -= step_coef_power_function;
+					#endif
+					// ---- Calcul du poids
+					weight = pow( confidence_sm, coef_power_function );
+
+					tsm = mix( v4_visibility_prev.x, 1.0, weight );
+				}
+				else
+				{
+//					out_color = YELLOW;
+//					tsm = mix( v4_visibility_prev.x, f_coef_shadow, weight );
+				}
+			}
+		}
+	}
+	else
+	{
+//		out_color = WHITE;
+//		tsm = mix( v4_visibility_prev.x, 1.0, weight );
+	}
+}
+
+// Shadow Texture 2D
+vec4 interpolate_bicubic_fast(sampler2DShadow tex_depth_map, vec3 _texCoord, vec2 _sizeTexture)
+{
+	float 	x = _texCoord.x * _sizeTexture.x,
+		y = _texCoord.y * _sizeTexture.y,
+		z = _texCoord.z;
+	
+	// transform the coordinate from [0,extent] to [-0.5, extent-0.5]
+	vec2 vec_bias 	= vec2(0.5);
+	vec2 coord_grid = vec2(x, y) - vec_bias;
+	vec2 index 	= floor(coord_grid); 		// nearest integer
+	vec2 fraction 	= coord_grid - index;		//
+	vec2 one_frac 	= 1.0 - fraction;
+	
+	// bspline_weights(fraction, w0, w1, w2, w3);
+	vec2 w0 = 1.0/6.0 * one_frac*one_frac*one_frac;
+	vec2 w1 = 2.0/3.0 - 0.5 * fraction*fraction*(2.0-fraction);
+	vec2 w2 = 2.0/3.0 - 0.5 * one_frac*one_frac*(2.0-one_frac);
+	vec2 w3 = 1.0/6.0 * fraction*fraction*fraction;
+
+	vec2 g0 = w0 + w1;
+	vec2 g1 = w2 + w3;
+	vec2 h0 = (w1 / g0) - vec2(0.5) + index;  //h0 = w1/g0 - 1, move from [-0.5, extent-0.5] to [0, extent]
+	vec2 h1 = (w3 / g1) + vec2(1.5) + index;  //h1 = w3/g1 + 1, move from [-0.5, extent-0.5] to [0, extent]
+	
+	//
+	h0 /= _sizeTexture;
+	h1 /= _sizeTexture;
+	
+	// fetch the four linear interpolations
+	
+	vec4 tex00 = shadow2D(tex_depth_map, vec3(h0.x, h0.y, z) );
+	vec4 tex10 = shadow2D(tex_depth_map, vec3(h1.x, h0.y, z) );
+	vec4 tex01 = shadow2D(tex_depth_map, vec3(h0.x, h1.y, z) );
+	vec4 tex11 = shadow2D(tex_depth_map, vec3(h1.x, h1.y, z) );
+
+	// weigh along the y-direction
+	tex00 = mix(tex01, tex00, g0.y);
+	tex10 = mix(tex11, tex10, g0.y);
+
+	// weigh along the x-direction
+	return mix(tex10, tex00, g0.x);
+}
+
+// Texture 2D
+vec4 interpolate_bicubic_fast(sampler2D tex, vec2 _texCoord, vec2 _sizeTexture)
+{
+	float 	x = _texCoord.x * _sizeTexture.x,
+		y = _texCoord.y * _sizeTexture.y;
+	 
+	// transform the coordinate from [0,extent] to [-0.5, extent-0.5]
+	vec2 vec_bias 	= vec2(0.5);
+	vec2 coord_grid = vec2(x, y) - vec_bias;
+	vec2 index 	= floor(coord_grid); 		// nearest integer
+	vec2 fraction 	= coord_grid - index;		//
+	vec2 one_frac 	= 1.0 - fraction;
+	
+	// bspline_weights(fraction, w0, w1, w2, w3);
+	vec2 w0 = 1.0/6.0 * one_frac*one_frac*one_frac;
+	vec2 w1 = 2.0/3.0 - 0.5 * fraction*fraction*(2.0-fraction);
+	vec2 w2 = 2.0/3.0 - 0.5 * one_frac*one_frac*(2.0-one_frac);
+	vec2 w3 = 1.0/6.0 * fraction*fraction*fraction;
+
+	vec2 g0 = w0 + w1;
+	vec2 g1 = w2 + w3;
+	vec2 h0 = (w1 / g0) - vec2(0.5) + index;  //h0 = w1/g0 - 1, move from [-0.5, extent-0.5] to [0, extent]
+	vec2 h1 = (w3 / g1) + vec2(1.5) + index;  //h1 = w3/g1 + 1, move from [-0.5, extent-0.5] to [0, extent]
+	
+	//
+	h0 /= _sizeTexture;
+	h1 /= _sizeTexture;
+	
+	// fetch the four linear interpolations
+	vec4 tex00 = texture2D(tex, vec2(h0.x, h0.y) );
+	vec4 tex10 = texture2D(tex, vec2(h1.x, h0.y) );
+	vec4 tex01 = texture2D(tex, vec2(h0.x, h1.y) );
+	vec4 tex11 = texture2D(tex, vec2(h1.x, h1.y) );
+
+	// weigh along the y-direction
+	tex00 = mix(tex01, tex00, g0.y);
+	tex10 = mix(tex11, tex10, g0.y);
+
+	// weigh along the x-direction
+	return mix(tex10, tex00, g0.x);
+}
+
+float Compute_Grid( vec2 v4_texel_in_light_texture, vec2 _sizeTexture )
+{
+	float tex_width = _sizeTexture.x;
+	float tex_height = _sizeTexture.y;
+	
+	// Grille de projection de la shadow map (i.e grille de rasterisation projetée sur la scene)
+	float grid_sm_x = v4_texel_in_light_texture.x * tex_width;
+	//grid_sm_x -= 0.5;
+	grid_sm_x -= floor(grid_sm_x);
+	grid_sm_x = 1. - grid_sm_x;
+	
+	float grid_sm_y = v4_texel_in_light_texture.y * tex_height;
+	//grid_sm_y -= 0.5;
+	grid_sm_y -= floor(grid_sm_y);	
+	grid_sm_y = 1. - grid_sm_y;
+	//
+	float grid_sm;
+	//grid_sm = smoothstep( -0.5, +0.5, grid_sm_x * grid_sm_y );
+	grid_sm = grid_sm_x * grid_sm_y;
+	//
+	return grid_sm;
+	}
+	
+vec4 filterColor( in float coef_shadow )
+{
+	vec4 iso_color;
+	
+	// exhibe 3 frontières (3 courbes iso)
+	const float fCoef_Width = 0.1;
+	vec3 v3CoefISOs;
+	//
+	v3CoefISOs.x = smoothstep( 0. + EPSILON, 0. + fCoef_Width, coef_shadow);
+	v3CoefISOs.y = smoothstep( 1. - fCoef_Width, 1.0 -EPSILON, coef_shadow);
+	v3CoefISOs.z = smoothstep( .5 - fCoef_Width, .5 + fCoef_Width, coef_shadow);
+	//
+	v3CoefISOs = vec3(1.) - abs((v3CoefISOs*vec3(2.)) - vec3(1.));
+	//
+	iso_color += v3CoefISOs.x * RED;
+	iso_color += v3CoefISOs.y * GREEN;
+	iso_color += v3CoefISOs.z * BLUE;
+	//
+	return iso_color;
+	}

@@ -1,0 +1,9 @@
+# File produced by AccuTrans 3D
+
+newmtl TORUS_KNOT01_FACES
+       Ns 4
+       d 1
+       illum 2
+       Kd 0.345000 0.780000 0.882000
+       Ka 0.000000 0.000000 0.000000
+       Ks 0.000000 0.000000 0.000000

@@ -1,0 +1,21 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  3.5.10.1242
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl Default
+Ka 0 0 0
+Kd 0.501961 0.501961 0.501961
+Ks 0.501961 0.501961 0.501961
+illum 2
+Ns 64
+map_Kd grey_checker.png
+
+newmtl Explorer_Default
+Ka 0.117647 0.117647 0.117647
+Kd 0.490196 0.490196 1
+Ks 0 0 0
+illum 2
+Ns 8

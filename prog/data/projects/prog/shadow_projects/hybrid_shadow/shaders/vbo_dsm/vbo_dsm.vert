@@ -1,0 +1,93 @@
+// Define used GLSL version
+#version 120
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+// MACROS
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+#define NORMALIZED_VERTEX( _vertex )	( (_vertex) / (_vertex).w )
+#define PROJECT_VERTEX(_mat, _vertex)	( NORMALIZED_VERTEX( (_mat) * (_vertex) ) )
+//
+#define COMPUTE_LIGHTING( v3_vertex, v3_normal, v3_light_pos ) dot( normalize(v3_light_pos - v3_vertex), v3_normal );
+//
+#define	MIN3(a, b, c) min(min(a, b),c)
+#define	MAX3(a, b, c) max(max(a, b),c)
+
+#define EPSILON		(0.000001)		//@@ trouver l'epsilon des floats (autour de 0.)
+
+//#define __USE_SMOOTH_STEP_ON_DIFFUSE_LIGHTING__
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+uniform vec3 	u_v3_light_pos_in_object;
+uniform float	u_f_seuil_iso;
+
+// Vertex i courant
+// gl_MultiTexCoord{0,1}: Vertex {(i+1)%2, (i+2)%2}
+// gl_MultiTexCoord[2,3]: Normals{(i+1)%2, (i+2)%2}
+
+varying float 	v_f_is_triangle_silhouette;
+varying float 	v_f_coef_lighting;
+
+vec3 	v3_vertex[3];
+vec3 	v3_normals[3];
+float 	f_coefs_lighting[3];
+bool 	b_edges_are_silhouettes[2];
+vec3 	v3_light_position_in_object;
+bool 	b_is_triangle_silhouette;
+
+bool compute_is_edge_silhouette_0( float f_coef0_lighting, float f_coef1_lighting, float f_seuil );
+bool compute_is_edge_silhouette_1( float f_coef0_lighting, float f_coef1_lighting, float f_seuil );
+
+void main(void) {
+	// Light Position in Object Space
+	v3_light_position_in_object = u_v3_light_pos_in_object;
+
+	// On récupère les vertex du triangle rasterisé
+	v3_vertex[0] 	= gl_Vertex.xyz;
+        v3_vertex[1] 	= gl_MultiTexCoord0.xyz;
+        v3_vertex[2] 	= gl_MultiTexCoord1.xyz;
+	// On récupère les normales du triangle rasterisé
+	v3_normals[0] 	= gl_Normal.xyz;
+        v3_normals[1] 	= gl_MultiTexCoord2.xyz;
+        v3_normals[2] 	= gl_MultiTexCoord3.xyz;
+
+	for(int i=0; i<3; i++)
+		f_coefs_lighting[i] = COMPUTE_LIGHTING( v3_vertex[i], v3_normals[i], u_v3_light_pos_in_object );
+
+//	#ifdef __USE_SMOOTH_STEP_ON_DIFFUSE_LIGHTING__
+//		for(int i=0; i<3; i++)
+//			f_coefs_lighting[i] = f_coefs_lighting[i] > 0 ? smoothstep(0.0, 1.0, f_coefs_lighting[i]) : f_coefs_lighting[i];
+//	#endif
+
+	for(int i=0; i<2; i++)	
+                b_edges_are_silhouettes[i] = compute_is_edge_silhouette_0( f_coefs_lighting[0], f_coefs_lighting[i+1], u_f_seuil_iso );
+//                b_edges_are_silhouettes[i] = compute_is_edge_silhouette_1( f_coefs_lighting[0], f_coefs_lighting[i+1], u_f_seuil_iso );
+
+        b_is_triangle_silhouette = b_edges_are_silhouettes[0] || b_edges_are_silhouettes[1];
+
+
+	// - OUTPUTS
+        v_f_is_triangle_silhouette	= b_is_triangle_silhouette ? 1.0 : 0.0;
+	v_f_coef_lighting		= f_coefs_lighting[0];        
+        gl_Position 			= ftransform();
+}
+
+bool compute_is_edge_silhouette_0( float f_coef0_lighting, float f_coef1_lighting, float f_seuil )
+{
+        float f_ecart_iso = 0.001;
+
+	float f_min_coefs_lighting = min( f_coef0_lighting, f_coef1_lighting );
+	float f_max_coefs_lighting = max( f_coef0_lighting, f_coef1_lighting );
+
+	float f_seuil_min = (f_seuil + (f_ecart_iso/2.));
+	float f_seuil_max = (f_seuil - (f_ecart_iso/2.));
+
+	return (f_min_coefs_lighting <= f_seuil_min) && (f_max_coefs_lighting >= f_seuil_max);
+}
+
+bool compute_is_edge_silhouette_1( float f_coef0_lighting, float f_coef1_lighting, float f_seuil )
+{
+	vec2 v2_sign = sign( vec2(f_coef0_lighting, f_coef1_lighting) - vec2(f_seuil) );
+	float f_abs_dot = abs( v2_sign.x + v2_sign.y );
+	return (f_abs_dot != 2.);
+}
+

@@ -1,0 +1,20 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  3.5.10.1242
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl Material__1
+Ka 0.117647 0.117647 0.117647
+Kd 1 0.501961 0
+Ks 0 0 0
+illum 2
+Ns 8
+
+newmtl Explorer_Default
+Ka 0.117647 0.117647 0.117647
+Kd 0 0 0.627451
+Ks 1 1 0
+illum 2
+Ns 8

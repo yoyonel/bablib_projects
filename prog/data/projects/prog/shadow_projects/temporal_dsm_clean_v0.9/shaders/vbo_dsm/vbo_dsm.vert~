@@ -1,0 +1,9 @@
+// Define used GLSL version
+#version 120
+
+//uniform	mat4	u_m4_object_world;	// Uniform Matrix4 Object_Space to World_Space
+
+
+void main(void) {
+	gl_Position = ftransform();
+}

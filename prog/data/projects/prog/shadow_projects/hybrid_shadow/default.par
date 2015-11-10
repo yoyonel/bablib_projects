@@ -1,0 +1,149 @@
+//windowSize = 1280 720
+windowSize = 1024 768
+//windowSize = 1024 1024
+//windowSize = 768 768
+//windowSize = 512 512
+//windowSizze = 256 256
+
+// - OBJ
+//model.default 	= ../../data/models/OBJ/dragon.obj
+//model.default 	= ../../data/models/OBJ/bunny.obj
+//model.default 	= ../../data/models/OBJ/halo.obj
+//model.default		= ../../data/models/OBJ/teapot.obj
+//model.default		= ../../data/models/OBJ/Alfa_159.obj	// voiture
+//model.default		= ../../data/models/OBJ/trees02.obj	// arbre avec un plan
+//model.default		= ../../data/models/OBJ/CenterObject.obj
+//model.default		= ../../data/models/OBJ/RoomObject1.obj	 Extra-Terreste
+//model.default		= ../../data/models/OBJ/ateneam2.obj
+//model.default		= ../../data/models/OBJ/plane.obj
+//model.default		= ../../data/models/OBJ/elephal.obj
+//model.default		= ../../data/models/OBJ/maxplanck.obj
+//model.default		= ../../data/models/OBJ/tiny_mechpart.obj
+//model.default		= ../../data/models/OBJ/tiny_venus.obj
+//
+//model.default		= ../../data/models/OBJ/tiny_triceratops.obj
+model.default		= ../../data/models/OBJ/elephant-poses/elephant-01.obj
+//model.default		= ../../data/models/OBJ/sphere.obj
+//model.default		= ../../data/models/OBJ/feline.obj	// griffon
+//model.default		= ../../data/models/OBJ/knot.obj
+//model.default		= ../../data/models/OBJ/santa.obj
+//model.default		= ../../data/models/OBJ/horse.obj
+// - OFF
+//model.default 	= ../../data/models/OFF/camel.off
+//model.default 	= ../../data/models/OFF/ref_chinese_dragon.off
+
+shaderDir.vbo_sv0           = [shaders]/vbo_sv0
+shaderDir.vbo_sv1           = [shaders]/vbo_sv1
+shaderDir.vbo               = [shaders]/vbo
+shaderDir.vbo_dsm           = [shaders]/vbo_dsm
+shaderDir.draw_texture      = [shaders]/draw_texture
+shaderDir.vbo_sv_geom       = [shaders]/vbo_sv_geom
+shaderDir.vbo_smoothies_geom = [shaders]/vbo_smoothies_geom
+
+// - Depth Shadow Map
+////texture.dsm.width 		= 128
+//texture.dsm.height		= 128
+////texture.dsm.internalformat	= GL_DEPTH_COMPONENT32
+//texture.dsm.internalformat	= GL_DEPTH_COMPONENT16
+////texture.dsm.filter		= GL_NEAREST
+//texture.dsm.filter		= GL_LINEAR
+//texture.dsm.wrapmode		= GL_CLAMP_TO_BORDER
+//texture.dsm.border_color	= 1 0 0 0
+
+timer_query.print 		= false
+draw_debug_textures		= true
+
+//
+vbo.expand			= false
+//
+vbo.enable_cull_face		= true
+//
+vbo.coef_extrusion		= 0.05
+//
+vbo.enable_polygon_offset	= true
+vbo.polygon_offset_scale	= +0.05
+vbo.polygon_offset_bias		= +0.0
+//
+vbo.enable_blend_for_extrusion	= true
+vbo.coef_alpha			= 0.0
+//
+vbo.coef_seuil_iso		= -0.00
+//vbo.coef_seuil_iso		= 0.7
+//vbo.coef_seuil_iso		= -0.000500005
+//vbo.coef_seuil_iso		= -0.4
+//
+vbo.geometry_shader.input_type		= GL_TRIANGLES
+vbo.geometry_shader.output_type 	= GL_TRIANGLE_STRIP
+vbo.geometry_shader.nb_vertices_out	= 11    // 4 + 3 + 3 == shadow_quad + near_cap + far_cap (pour Z-FAIL)
+//
+vbo.smoothies.geometry_shader.input_type	= GL_TRIANGLES
+vbo.smoothies.geometry_shader.output_type 	= GL_TRIANGLE_STRIP
+vbo.smoothies.geometry_shader.nb_vertices_out	= 4
+
+light_camera.draw			= true
+light_camera.intensity_isNotManipulated	= 0.0
+light_camera.intensity_isManipulated	= 0.75
+
+stencil_buffer.enable		= true
+stencil_buffer.bits		= 8
+
+vbo.render_caster                                       = true
+
+//
+shadow_volume.render_shadow                             = true
+shadow_volume.coef_extrusion                            = 10.0
+shadow_volume.render_shadow_volume_polygons             = false
+shadow_volume.render_shadow_volume_polygons.use_culling = false
+shadow_volume.coef_alpha                                = 1.0
+shadow_volume.color_shadow_volume_polygons              = 0.2 0.8 0.1 0.3
+// - Depth Bounds Tests
+shadow_volume.depth_bounds.activate		= false
+shadow_volume.depth_bounds.zmin			= 0.0
+shadow_volume.depth_bounds.zmax			= 0.0
+//
+shadow_volume.use_geometry_shader		= true
+//
+shadow_volume.use_zfail				= false
+
+// -------------- SMOOTHIES --------------  //
+smoothies.render_smoothies                      = false
+smoothies.coef_extrusion                        = 0.025
+//
+smoothies.render_smoothies_polygons             = true
+smoothies.render_smoothies_polygons.use_culling = false
+//
+smoothies.coef_alpha                            = 1.0
+smoothies.color_smoothies_polygons              = 0.2 0.8 0.1 0.3
+//
+smoothies.use_geometry_shader		= true
+// -------------- SMOOTHIES --------------  //
+
+plane.nb_quad_patch		= 1		// nb_quad = plane.nb_quad_patch * plane.nb_quad_patch
+plane.render			= true
+
+// - SM - Depth Shadow Map
+texture.dsm.width 		= 512
+texture.dsm.height		= 512
+texture.dsm.internalformat	= GL_DEPTH_COMPONENT32
+//texture.dsm.internalformat	= GL_DEPTH_COMPONENT16
+//texture.dsm.filter		= GL_NEAREST
+texture.dsm.filter		= GL_LINEAR
+texture.dsm.wrapmode		= GL_CLAMP_TO_BORDER
+texture.dsm.border_color	= 1 0 0 0
+
+// - SM - Edges Map
+texture.sm_edges.internalformat	= GL_RGBA_FLOAT32_ATI
+texture.sm_edges.filter		= GL_NEAREST
+//texture.sm_edges.filter  	= GL_LINEAR
+texture.sm_edges.wrapmode	= GL_CLAMP_TO_BORDER
+
+shadow_map.use_shadow_proj	= true
+//
+shadow_map.use_polygon_offset	= false
+shadow_map.polygon_offset.scale	= 1.2
+shadow_map.polygon_offset.bias	= 8.0
+//
+shadow_map.use_constant_depth_bias	= false
+shadow_map.constant_depth_bias	= -0.025
+//
+shadow_map.use_back_face		= false

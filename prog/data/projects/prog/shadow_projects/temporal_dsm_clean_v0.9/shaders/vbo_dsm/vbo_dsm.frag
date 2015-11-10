@@ -1,0 +1,7 @@
+// Define used GLSL version
+#version 120
+
+void main(void) {
+	//gl_FragDepth = gl_FragCoord.z;
+}
+
