@@ -1,0 +1,47 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  3.5.10.1242
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl TD_trunk
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0
+illum 2
+Ns 4
+map_Kd PBARK_C.png
+
+newmtl TD_root
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0
+illum 2
+Ns 4
+map_Kd PBARK_C.png
+
+newmtl TD_branch
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0
+illum 2
+Ns 4
+map_Kd PBARK_C.png
+
+newmtl leaf
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0
+illum 2
+Ns 4
+map_Kd Sm-brchC.png
+map_opacity Sm-brchT.png
+map_d Sm-brchT.png
+
+newmtl Explorer_Default
+Ka 0.117647 0.117647 0.117647
+Kd 0.772549 0.85098 0.701961
+Ks 0 0 0
+illum 2
+Ns 8
